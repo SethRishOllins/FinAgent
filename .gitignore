@@ -9,3 +9,4 @@ coverage/
 .pytest_cache/
 data/raw/
 data/processed/
+docs/reports/qa/
