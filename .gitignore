@@ -10,3 +10,5 @@ coverage/
 data/raw/
 data/processed/
 docs/reports/qa/
+backend/finagent.db
+backend/*.db

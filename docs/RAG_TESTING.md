@@ -1,0 +1,3 @@
+# RAG Testing
+
+Run backend tests from `backend` with `python -m pytest -q`. Unit tests use deterministic fake embedding/vector adapters for ingestion and retrieval contract checks; parser tests exercise malformed/scanned PDFs, text/CSV, chunk traceability and the regression that PDF bytes are parsed as PDF rather than decoded as UTF-8. In this environment test collection was attempted but could not start because SQLAlchemy was not installed; installing dependencies was blocked by unavailable network/DNS. Python `compileall` passed. Actual OpenAI/Qdrant and PostgreSQL integrations require configured services and are not part of the credential-free suite. DOCX integration and browser behavior still need verification. The frontend `npm run build` passed.

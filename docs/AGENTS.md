@@ -1,5 +1,7 @@
-# Agents
+# Research Workflow
 
-The master orchestrator delegates narrow tasks to agents and records each event. The critic is mandatory and explicitly reports insufficient sources, low confidence, contradictions, and unavailable data. Final output always carries the financial research disclaimer.
+The research coordinator creates a bounded investigation. Market analysis, financial analysis, and news intelligence operate on separate provider results; document research preserves its evidence boundary until indexed sources are retrieved.
 
-The current runnable workflow uses deterministic offline data to make demonstrations reproducible. Live market/news/filing providers, RAG ingestion, and LLM synthesis must be configured before any live research use.
+The critic review records unavailable or incomplete sources, and synthesis emits a research disclaimer. The workflow is deterministic in structure, not in market content: live data is used only when the configured provider returns it, and unavailable inputs remain visible in the report.
+
+The current workflow does not call an LLM. This is intentional: a document-grounded LLM would export retrieved excerpts to an external provider and requires an explicit deployment/data-governance decision. The existing citation-only document response is the safe offline behavior.

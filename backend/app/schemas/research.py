@@ -11,7 +11,8 @@ class Finding(BaseModel):
     agent: str
     title: str
     detail: str
-    confidence: float = Field(ge=0, le=1)
+    confidence_label: str = "unavailable"
+    confidence_method: str = "Evidence-completeness label, not a probability or investment-success estimate."
     evidence: list[str] = []
     limitations: list[str] = []
 
@@ -32,6 +33,7 @@ class ResearchResponse(BaseModel):
     findings: list[Finding]
     warnings: list[str]
     activity: list[AgentEvent]
+    provenance: dict[str, dict] = Field(default_factory=dict)
     disclaimer: str
 
 
