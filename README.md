@@ -5,6 +5,7 @@ FinAgent is an evidence-scoped financial research workspace for Indian equities.
 ## What Is Implemented
 
 - Replaceable market, financial, company-profile, and news provider contracts.
+- Saved company universe: add a provider-verified ticker once and reuse it across research, comparison, forecast, and backtest views.
 - Yahoo Finance integration for NSE-style symbols such as `RELIANCE` (`RELIANCE.NS`) and supported index aliases.
 - NewsAPI integration, enabled only when `NEWSAPI_KEY` is configured.
 - Normalized `LIVE`, `CACHED`, and `UNAVAILABLE` source states with source and retrieval timestamps.
@@ -12,6 +13,7 @@ FinAgent is an evidence-scoped financial research workspace for Indian equities.
 - Redis JSON caching when `REDIS_URL` is configured. A cache outage is bypassed; it never fabricates or silently marks stale data as live.
 - PDF, TXT, Markdown, and CSV parsing; structured chunking; configurable OpenAI embeddings; Qdrant-backed semantic retrieval with page/section citations.
 - Research and chat boundaries that distinguish retrieved evidence from unavailable inputs and decline buy/sell instructions.
+- AI Council local evidence workflow with persistent sessions, source-scoped retrieval, specialist evidence summaries, bounded reviewer events, and honest partial completion when LLM review is not configured.
 
 ## Local Setup
 
@@ -73,8 +75,14 @@ Open `http://localhost:5173`.
 | Durable application data | `DATABASE_URL` | Run `alembic upgrade head` before starting the API; use PostgreSQL in deployments. |
 | Cache | `REDIS_URL` | Cache is disabled without affecting live-provider calls. |
 | Document semantic search | `OPENAI_API_KEY`, `QDRANT_URL` | Upload/search returns an explicit unavailable error. |
+| AI Council evidence collection | Existing market/news providers; `OPENAI_API_KEY`, `QDRANT_URL` for selected-document retrieval | Unavailable sources are recorded; the Council completes only a partial evidence inventory. |
+| AI Council generated debate / LLM evidence review | Not enabled in the current implementation | This deployment deliberately does not send private retrieved excerpts or financial data to an LLM without an explicit external data-governance approval. The interface labels this limitation and does not fabricate agent debate. |
 
 See [docs/LIVE_ARCHITECTURE.md](docs/LIVE_ARCHITECTURE.md) for the data flow, endpoints, storage model, and operational limitations.
+
+### AI Council
+
+The Council page gathers available provider records and optionally searches only documents selected by the user. A migration creates persistent sessions at `/api/v1/council`; list/detail/report endpoints expose the stored findings, evidence references, events, and partial status. Apply migrations with `alembic upgrade head`. Provider and document retrieval follows the existing configuration above. The current version does not perform LLM-authored analysis or substantive cross-examination: external transmission of financial data and private document excerpts requires a deployment data-governance decision. It will not claim a genuine AI debate until that boundary is approved and implemented.
 
 ### Database schema error
 

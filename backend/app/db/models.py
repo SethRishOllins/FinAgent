@@ -110,3 +110,21 @@ class DataSourceMetadata(Base):
     retrieved_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     data_timestamp: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     payload: Mapped[dict] = mapped_column(JSON, default=dict)
+
+
+class CouncilSession(Base):
+    __tablename__ = "council_sessions"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    question: Mapped[str] = mapped_column(Text)
+    symbol: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
+    request_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    status: Mapped[str] = mapped_column(String(32), default="CREATED", index=True)
+    stage: Mapped[str] = mapped_column(String(32), default="CREATED")
+    report: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    findings: Mapped[list] = mapped_column(JSON, default=list)
+    evidence: Mapped[list] = mapped_column(JSON, default=list)
+    debate: Mapped[list] = mapped_column(JSON, default=list)
+    events: Mapped[list] = mapped_column(JSON, default=list)
+    failure_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)

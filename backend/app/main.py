@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 import logging
+from threading import Thread
+from datetime import datetime, timezone
 
 from fastapi import Depends, FastAPI, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -10,13 +12,18 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.agents.orchestrator import ResearchOrchestrator
+from app.agents.council import CouncilOrchestrator
 from app.core.config import settings
 from app.db.repository import list_documents, list_reports, save_provenance, save_research, upsert_company
-from app.db.session import get_session, init_database
+from app.db.models import Company, CouncilSession
+from app.db.session import SessionLocal, get_session, init_database
 from app.rag.embeddings import EmbeddingFailure
 from app.rag.parser import DocumentParseError
 from app.rag.vector_store import VectorStoreFailure
-from app.schemas.research import ChatRequest, DocumentTextRequest, PortfolioRequest, ResearchRequest
+from app.schemas.research import AddCompanyRequest, ChatRequest, DocumentTextRequest, PortfolioRequest, ResearchRequest
+from app.schemas.council import CouncilRequest, CouncilSessionView, CouncilStage
+from sqlalchemy import select
+from uuid import uuid4
 from app.services.analytics import backtest_ma_crossover, forecast_experiment, portfolio_risk, risk_profile, technical_summary
 from app.services.assistant import answer
 from app.services.container import ServiceContainer, build_container
@@ -51,6 +58,15 @@ async def unexpected_error(request: Request, error: Exception):
     return JSONResponse(status_code=500, content={"detail": {"status": "INTERNAL_ERROR", "message": "The API could not complete this request. Check the backend terminal for details."}})
 
 
+@app.exception_handler(SQLAlchemyError)
+async def database_error(request: Request, error: SQLAlchemyError):
+    message = str(error).lower()
+    logger.error("Database request failed on %s %s: %s", request.method, request.url.path, type(error).__name__)
+    if "does not exist" in message or "undefinedtable" in message:
+        return JSONResponse(status_code=503, content={"detail": {"status": "DATABASE_SCHEMA_NOT_READY", "message": "FinAgent database migrations are not applied. Start PostgreSQL, then run `python -m alembic upgrade head` from the backend folder."}})
+    return JSONResponse(status_code=503, content={"detail": {"status": "DATABASE_UNAVAILABLE", "message": "FinAgent cannot connect to its configured database. Start PostgreSQL and verify DATABASE_URL in the project .env file, then retry."}})
+
+
 def services() -> ServiceContainer:
     return app.state.services
 
@@ -59,9 +75,78 @@ def orchestrator(container: ServiceContainer = Depends(services)) -> ResearchOrc
     return ResearchOrchestrator(container.live_data)
 
 
+def _council_view(row: CouncilSession) -> dict:
+    return {"id": row.id, "question": row.question, "symbol": row.symbol, "status": row.status, "stage": row.stage, "created_at": row.created_at, "updated_at": row.updated_at, "report": row.report, "findings": row.findings, "evidence": row.evidence, "debate": row.debate, "events": row.events, "failure_reason": row.failure_reason}
+
+
+def _run_council_session(session_id: str, request: CouncilRequest, container: ServiceContainer) -> None:
+    db = SessionLocal()
+    try:
+        row = db.get(CouncilSession, session_id)
+        if row:
+            CouncilOrchestrator(container).run(row, db, request)
+    except Exception:
+        logger.exception("Background AI Council task failed for %s", session_id)
+    finally:
+        db.close()
+
+
+@app.post("/api/v1/council", status_code=202)
+def create_council(request: CouncilRequest, session: Session = Depends(get_session), container: ServiceContainer = Depends(services)):
+    now = datetime.now(timezone.utc)
+    row = CouncilSession(id=str(uuid4()), question=request.question, symbol=request.symbol, request_json=request.model_dump(mode="json"), status=CouncilStage.CREATED.value, stage=CouncilStage.CREATED.value, created_at=now, updated_at=now)
+    row.events = [{"type": "session_created", "stage": CouncilStage.CREATED.value, "detail": "Persisted a new AI Council session.", "timestamp": row.created_at.isoformat()}]
+    session.add(row)
+    session.commit()
+    Thread(target=_run_council_session, args=(row.id, request, container), name=f"council-{row.id[:8]}", daemon=True).start()
+    return {"id": row.id, "status": row.status, "stage": row.stage}
+
+
+@app.get("/api/v1/council")
+def council_history(session: Session = Depends(get_session)):
+    rows = session.scalars(select(CouncilSession).order_by(CouncilSession.created_at.desc()).limit(100)).all()
+    return [{"id": row.id, "question": row.question, "symbol": row.symbol, "status": row.status, "stage": row.stage, "created_at": row.created_at, "updated_at": row.updated_at} for row in rows]
+
+
+@app.get("/api/v1/council/{session_id}")
+def council_session(session_id: str, session: Session = Depends(get_session)):
+    row = session.get(CouncilSession, session_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Council session not found.")
+    return _council_view(row)
+
+
+@app.get("/api/v1/council/{session_id}/report")
+def council_report(session_id: str, session: Session = Depends(get_session)):
+    row = session.get(CouncilSession, session_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Council session not found.")
+    if not row.report:
+        raise HTTPException(status_code=409, detail={"status": row.status, "message": row.failure_reason or "The report is not available yet."})
+    return row.report
+
+
 @app.get("/health")
 def health(container: ServiceContainer = Depends(services)):
     return {"status": "ok", "data_mode": settings.data_mode, "database": settings.database_url.split(":", 1)[0], "cache": container.live_data.cache.health(), "providers": {"market": settings.market_provider, "financials": settings.financial_provider, "profile": settings.profile_provider, "news": settings.news_provider, "embeddings": settings.embedding_provider}}
+
+
+@app.get("/api/v1/companies/saved")
+def saved_companies(session: Session = Depends(get_session)):
+    rows = session.scalars(select(Company).order_by(Company.symbol)).all()
+    return [{"symbol": row.symbol, "name": row.name, "exchange": row.exchange, "sector": row.sector, "updated_at": row.updated_at} for row in rows]
+
+
+@app.post("/api/v1/companies", status_code=201)
+def add_company(request: AddCompanyRequest, session: Session = Depends(get_session), container: ServiceContainer = Depends(services)):
+    symbol = request.normalized_symbol()
+    result = container.live_data.profile(symbol)
+    if not result.data:
+        message = result.error.message if result.error else f"The configured company profile provider could not verify {symbol}."
+        raise HTTPException(status_code=422, detail={"status": result.status.value, "message": message})
+    company = upsert_company(session, symbol, name=result.data.name, exchange=result.data.exchange, sector=result.data.sector)
+    session.commit()
+    return {"symbol": company.symbol, "name": company.name, "exchange": company.exchange, "sector": company.sector, "status": result.status.value, "source": result.provenance.source if result.provenance else None, "updated_at": company.updated_at}
 
 
 @app.get("/api/v1/companies")

@@ -7,6 +7,13 @@ class ResearchRequest(BaseModel):
     question: str = Field(default="Provide an evidence-led company research brief.", max_length=1000)
 
 
+class AddCompanyRequest(BaseModel):
+    symbol: str = Field(min_length=1, max_length=20, pattern=r"^[A-Za-z0-9.^=-]+$")
+
+    def normalized_symbol(self) -> str:
+        return self.symbol.strip().upper()
+
+
 class Finding(BaseModel):
     agent: str
     title: str
